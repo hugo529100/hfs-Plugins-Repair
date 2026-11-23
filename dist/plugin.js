@@ -23,7 +23,7 @@
 // every operation in storage/journal.jsonl so a batch can be undone.
 
 exports.repo = "hugo529100/hfs-Plugins-Repair"
-exports.version = 1.74
+exports.version = 1.86
 exports.apiRequired = [12.7, 13.72]
 exports.description = 'Analyze and repair the installed plugin library: three-way check between online catalog, plugin folders and config.yaml, seamless config migration, safe folder renames, plugin.js repo fixes and trash-based deletion.'
 exports.preview = []
@@ -2832,14 +2832,24 @@ exports.init = async api => {
     // ============================================================
     function middleware(ctx) {
         if (ctx.method !== 'GET') return
+        const assetMatch = String(ctx.path).match(/\/~\/plugins\/Plugins-Repair\/admin\.(js|css)$/)
+        if (assetMatch) {
+            const ext = assetMatch[1]
+            const file = path.join(__dirname, 'public', ext === 'js' ? 'admin.js' : 'admin.css')
+            return () => {
+                ctx.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                ctx.set('Pragma', 'no-cache')
+                ctx.type = ext === 'js' ? 'application/javascript; charset=utf-8' : 'text/css; charset=utf-8'
+                ctx.body = exists(file) ? readText(file) : '/* missing */'
+            }
+        }
         if (ctx.path !== '/~/admin' && ctx.path !== '/~/admin/') return
         return () => {
             if (typeof ctx.body !== 'string' || ctx.body.includes('plugins-repair-admin')) return
             const base = (ctx.state?.revProxyPath || '') + '/~/plugins/' + PLUGIN_ID + '/'
             const v = encodeURIComponent(String(exports.version))
-            const assetVersion = String(exports.version).replace(/[^\w]/g, '')
             const data = `<script>window.__REPAIR_TOKEN__=${JSON.stringify(ADMIN_TOKEN)}</script>`
-            const tag = `<link rel="stylesheet" href="${base}admin.v${assetVersion}.css?v=${v}"><script id="plugins-repair-admin" src="${base}admin.v${assetVersion}.js?v=${v}"></script>`
+            const tag = `<link rel="stylesheet" href="${base}admin.css?v=${v}"><script id="plugins-repair-admin" src="${base}admin.js?v=${v}"></script>`
             if (ctx.body.includes('</head>')) ctx.body = ctx.body.replace('</head>', data + tag + '</head>')
             else if (ctx.body.includes('</body>')) ctx.body = ctx.body.replace('</body>', data + tag + '</body>')
         }
