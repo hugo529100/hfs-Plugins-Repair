@@ -120,6 +120,12 @@
         preludeToken: 0,
         settingsOpen: true,
         settingsLoaded: false,
+        orderEntries: [],
+        orderLoaded: false,
+        orderLoading: false,
+        orderSaving: false,
+        orderPending: false,
+        orderDragId: null,
         settingsLoading: false,
         nativeFullscreen: false,
         resumeChecked: false,
@@ -221,15 +227,19 @@
             tab.setAttribute('aria-label', TAB_LABEL)
             tab.tabIndex = -1
             tab.textContent = TAB_LABEL
-            tab.style.order = '99'
+            tab.style.order = '9999'
             tab.addEventListener('click', ev => {
                 ev.preventDefault()
                 ev.stopPropagation()
                 activate()
             })
             const indicator = $('.MuiTabs-indicator', list)
-            if (indicator) list.insertBefore(tab, indicator)
-            else list.appendChild(tab)
+            try {
+                if (indicator && indicator.parentElement === list) list.insertBefore(tab, indicator)
+                else list.appendChild(tab)
+            } catch {
+                try { list.appendChild(tab) } catch {}
+            }
             if (!list.dataset.repairBound) {
                 list.dataset.repairBound = '1'
                 list.addEventListener('click', ev => {
@@ -238,14 +248,9 @@
                 }, true)
             }
         }
-        // Always keep ANALYZE & REPAIR as the last visible tab.
-        tab.style.order = '99'
-        const indicatorNow = $('.MuiTabs-indicator', list)
-        if (indicatorNow) {
-            if (tab.nextElementSibling !== indicatorNow) list.insertBefore(tab, indicatorNow)
-        } else if (list.lastElementChild !== tab) {
-            list.appendChild(tab)
-        }
+        // CSS order keeps ANALYZE & REPAIR last. Do not move the node on every
+        // ensure: other tab-injecting plugins may be changing the same strip.
+        tab.style.order = '9999'
         state.tab = tab
         if (state.active) {
             tab.classList.add('Mui-selected')
@@ -454,6 +459,7 @@
         state.active = true
         state.mode = 'repair'
         if (state.panel) state.panel.dataset.repairMode = 'repair'
+        syncOrderVisibility()
         state.sidebarPending = false
         document.body.classList.add('repair-full-page')
         if (state.tabsRoot) {
@@ -585,6 +591,14 @@
     <button class="repair-btn repair-fullscreen-btn" data-act="fullscreen" title="Enter fullscreen" aria-label="Fullscreen">Fullscreen</button>
   </div>
 </div>
+<section class="repair-order" id="repair-order">
+  <div class="repair-order-head">
+    <span>PLUGIN LOAD ORDER · enable_plugins</span>
+  </div>
+  <div class="repair-order-hint">Drag a row (or use ↑/↓) to reorder plugin loading. Every change is saved to config.yaml automatically. HFS starts plugins concurrently; Plugins Repair also retries enabled plugins that failed with missing dependencies during startup.</div>
+  <ol class="repair-order-list" id="repair-order-list"></ol>
+  <pre class="repair-order-log" id="repair-order-log" aria-live="polite"></pre>
+</section>
 <div class="repair-stats" id="repair-stats"></div>
 <section class="repair-config" id="repair-config">
   <div class="repair-config-head">
@@ -649,6 +663,12 @@
                 onAction(btn.dataset.act)
                 return
             }
+            const move = ev.target.closest('[data-order-move]')
+            if (move) {
+                ev.preventDefault()
+                moveOrder(move.dataset.orderMove, Number(move.dataset.orderDir))
+                return
+            }
             const dec = ev.target.closest('[data-decision]')
             if (dec) {
                 ev.preventDefault()
@@ -690,6 +710,30 @@
                 return
             }
         })
+        panel.addEventListener('dragstart', ev => {
+            if (state.orderSaving) return
+            const row = ev.target.closest('.repair-order-item')
+            if (!row) return
+            state.orderDragId = row.dataset.orderId
+            row.classList.add('dragging')
+            try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', state.orderDragId) } catch {}
+        })
+        panel.addEventListener('dragover', ev => {
+            if (!state.orderDragId) return
+            if (ev.target.closest('.repair-order-list')) {
+                ev.preventDefault()
+                try { ev.dataTransfer.dropEffect = 'move' } catch {}
+            }
+        })
+        panel.addEventListener('drop', ev => {
+            if (!state.orderDragId || !ev.target.closest('.repair-order-list')) return
+            ev.preventDefault()
+            dropOrderAt(ev)
+        })
+        panel.addEventListener('dragend', () => {
+            state.orderDragId = null
+            for (const r of $$('.repair-order-item.dragging', panel)) r.classList.remove('dragging')
+        })
     }
 
     function activate() {
@@ -699,6 +743,7 @@
         state.active = true
         state.mode = 'settings'
         if (state.panel) state.panel.dataset.repairMode = 'settings'
+        syncOrderVisibility()
         if (state.tab) {
             state.tab.classList.add('Mui-selected')
             state.tab.setAttribute('aria-selected', 'true')
@@ -716,6 +761,7 @@
         setIndicator()
         requestAnimationFrame(fitPanel)
         if (!state.settingsLoaded) loadSettings()
+        if (!state.orderLoaded) loadOrder()
     }
 
     function deactivate() {
@@ -967,6 +1013,144 @@
         } finally {
             state.settingsLoading = false
         }
+    }
+
+    function syncOrderVisibility() {
+        const order = $('#repair-order')
+        if (order) {
+            if (state.mode === 'settings') {
+                order.style.display = 'flex'
+                if (!state.orderLoaded) loadOrder()
+            } else {
+                order.style.display = 'none'
+            }
+        }
+        const config = $('#repair-config')
+        if (config) {
+            config.style.display = state.mode === 'settings' ? '' : 'none'
+        }
+    }
+
+    function orderLog(level, text) {
+        const el = $('#repair-order-log')
+        if (!el) return
+        const div = document.createElement('div')
+        div.className = 'repair-order-line lv-' + level
+        div.textContent = `[${fmtTime(Date.now())}] ${text}`
+        el.appendChild(div)
+        while (el.children.length > 80) el.removeChild(el.firstChild)
+        el.scrollTop = el.scrollHeight
+    }
+
+    function renderOrder() {
+        const list = $('#repair-order-list')
+        if (!list) return
+        if (!state.orderEntries.length) {
+            list.innerHTML = '<li class="repair-order-empty">No enable_plugins entries.</li>'
+            return
+        }
+        list.innerHTML = state.orderEntries.map((e, i) => `
+            <li class="repair-order-item" draggable="${state.orderSaving ? 'false' : 'true'}" data-order-id="${esc(e.id)}">
+                <span class="repair-order-handle" title="Drag to reorder">⋮⋮</span>
+                <span class="repair-order-index">${i + 1}</span>
+                <span class="repair-order-name">${esc(e.id)}</span>
+                <span class="repair-order-meta">${e.missing ? 'missing folder' : (e.version ? 'v' + esc(e.version) : '—')}</span>
+                <span class="repair-order-move">
+                    <button data-order-move="${esc(e.id)}" data-order-dir="-1" ${i === 0 || state.orderSaving ? 'disabled' : ''} title="Move up">↑</button>
+                    <button data-order-move="${esc(e.id)}" data-order-dir="1" ${i === state.orderEntries.length - 1 || state.orderSaving ? 'disabled' : ''} title="Move down">↓</button>
+                </span>
+            </li>`).join('')
+    }
+
+    async function loadOrder(force = false) {
+        if (state.orderLoading) return
+        if (!force && state.orderLoaded) return
+        state.orderLoading = true
+        orderLog('dim', 'Loading enable_plugins order…')
+        try {
+            const data = await rest('pluginsRepair_loadOrder', {}, { timeout: 20000 })
+            state.orderEntries = data.entries || []
+            state.orderLoaded = true
+            renderOrder()
+            orderLog('ok', `Loaded ${state.orderEntries.length} enable_plugins entries`)
+        } catch (e) {
+            orderLog('error', 'Load failed: ' + e.message)
+        } finally {
+            state.orderLoading = false
+        }
+    }
+
+    async function saveOrder() {
+        if (!state.orderEntries.length) return
+        if (state.orderSaving) { state.orderPending = true; return }
+        state.orderSaving = true
+        const order = state.orderEntries.map(e => e.id)
+        orderLog('info', `Saving order (${order.length} plugins)…`)
+        try {
+            const data = await rest('pluginsRepair_saveLoadOrder', { order }, { timeout: 30000 })
+            state.orderEntries = data.entries || state.orderEntries
+            renderOrder()
+            orderLog('ok', `Saved to config.yaml${data.backup ? ' · backup ' + data.backup.split(/[\\/]/).pop() : ''}`)
+            toast('Plugin load order saved', 'ok')
+        } catch (e) {
+            orderLog('error', 'Save failed: ' + e.message)
+            toast('Could not save plugin order: ' + e.message, 'error')
+            await loadOrder(true)
+        } finally {
+            state.orderSaving = false
+            if (state.orderPending) {
+                state.orderPending = false
+                saveOrder()
+            } else {
+                renderOrder()
+            }
+        }
+    }
+
+    function moveOrder(id, dir) {
+        const i = state.orderEntries.findIndex(e => e.id === id)
+        const j = i + dir
+        if (i < 0 || j < 0 || j >= state.orderEntries.length) return
+        const [row] = state.orderEntries.splice(i, 1)
+        state.orderEntries.splice(j, 0, row)
+        renderOrder()
+        saveOrder()
+    }
+
+    function reorderOrder(dragId, targetId) {
+        if (!dragId || !targetId || dragId === targetId) return
+        const to = state.orderEntries.findIndex(e => e.id === targetId)
+        if (to < 0) return
+        reorderOrderToIndex(dragId, to)
+    }
+
+    function reorderOrderToIndex(dragId, targetIndex) {
+        const from = state.orderEntries.findIndex(e => e.id === dragId)
+        if (from < 0) return
+        let to = Math.max(0, Math.min(state.orderEntries.length, targetIndex))
+        if (from < to) to--
+        if (to === from) return
+        const [row] = state.orderEntries.splice(from, 1)
+        state.orderEntries.splice(to, 0, row)
+        renderOrder()
+        saveOrder()
+    }
+
+    function dropOrderAt(ev) {
+        if (!state.orderDragId) return
+        const list = $('#repair-order-list')
+        const rows = list ? $$('.repair-order-item', list) : []
+        if (!list || !rows.length) return
+        const row = ev.target.closest?.('.repair-order-item')
+        let targetIndex = rows.length
+        if (row) {
+            const idx = rows.indexOf(row)
+            const rect = row.getBoundingClientRect()
+            targetIndex = idx + (ev.clientY > rect.top + rect.height / 2 ? 1 : 0)
+        }
+        reorderOrderToIndex(state.orderDragId, targetIndex)
+        state.orderDragId = null
+        for (const r of $$('.repair-order-item.dragging', state.panel)) r.classList.remove('dragging')
     }
 
     function settingsValue(key) {
@@ -1660,7 +1844,7 @@
   </div>
   <div class="repair-card-foot">
     <div class="repair-decide">
-      <button class="repair-decide-btn ${decision === 'fix' && picked ? 'on-fix' : ''}" data-decision="fix" data-id="${esc(it.id)}" ${decision === 'ignore' || normalFixes.length ? '' : 'disabled'}>${decision === 'ignore' ? 'Undo ignore' : normalFixes.some(f => f.type === 'update') ? 'Update' : `Fix${normalFixes.length ? ` (${normalFixes.length})` : ''}`}</button>
+      <button class="repair-decide-btn ${decision === 'fix' && picked ? 'on-fix' : ''}" data-decision="fix" data-id="${esc(it.id)}" ${decision === 'ignore' || normalFixes.length ? '' : 'disabled'}>${decision === 'ignore' ? 'Undo ignore' : normalFixes.some(f => f.reinstall) ? 'Reinstall' : normalFixes.some(f => f.type === 'update') ? 'Update' : `Fix${normalFixes.length ? ` (${normalFixes.length})` : ''}`}</button>
       ${forceFix ? `<button class="repair-decide-btn ${forceSelected ? 'on-force' : ''}" data-force-online="${esc(it.id)}" title="Replace local v${esc(it.version ?? '?')} with online v${esc(it.online?.version ?? '?')} after a backup">Use online</button>` : ''}
       <button class="repair-decide-btn ${decision === 'ignore' ? 'on-ignore' : ''}" data-decision="ignore" data-id="${esc(it.id)}">Ignore</button>
       ${isOrphan ? '' : `<button class="repair-decide-btn ${decision === 'delete' ? 'on-delete' : ''}" data-decision="delete" data-id="${esc(it.id)}">Delete</button>`}

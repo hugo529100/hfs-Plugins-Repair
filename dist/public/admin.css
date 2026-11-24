@@ -342,7 +342,85 @@ body.repair-fullscreen-active { overflow: hidden !important; }
 #repair-panel .repair-config-actions .repair-btn { padding: 5px 9px; font-size: 11.5px; }
 
 /* The Installed tab is the backend settings view; the sidebar is the repair view. */
-#repair-panel[data-repair-mode="repair"] .repair-config { display: none !important; }
+#repair-panel[data-repair-mode="repair"] .repair-order { display: none !important; }
+#repair-panel .repair-order {
+    border: 1px solid var(--rp-border);
+    border-radius: 7px;
+    background: var(--rp-panel);
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 0;
+}
+#repair-panel .repair-order-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    color: var(--rp-muted);
+}
+#repair-panel .repair-order-hint { font-size: 10px; color: var(--rp-muted); line-height: 1.35; }
+#repair-panel .repair-order-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 38vh;
+    overflow: auto;
+    border: 1px solid var(--rp-border);
+    border-radius: 5px;
+    background: var(--rp-bg);
+}
+#repair-panel .repair-order-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--rp-border);
+    font-size: 11px;
+    cursor: grab;
+}
+#repair-panel .repair-order-item:last-child { border-bottom: none; }
+#repair-panel .repair-order-item.dragging { opacity: .45; }
+#repair-panel .repair-order-handle { color: var(--rp-muted); cursor: grab; font-size: 12px; }
+#repair-panel .repair-order-index { min-width: 20px; color: var(--rp-muted); font-variant-numeric: tabular-nums; }
+#repair-panel .repair-order-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#repair-panel .repair-order-meta { color: var(--rp-muted); font-size: 9.5px; white-space: nowrap; }
+#repair-panel .repair-order-move { display: flex; gap: 3px; }
+#repair-panel .repair-order-move button {
+    appearance: none;
+    border: 1px solid var(--rp-border);
+    background: var(--rp-raised);
+    color: var(--rp-text);
+    border-radius: 4px;
+    width: 24px;
+    height: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+#repair-panel .repair-order-move button:disabled { opacity: .35; cursor: default; }
+#repair-panel .repair-order-empty { padding: 6px; color: var(--rp-muted); }
+#repair-panel .repair-order-log {
+    max-height: 120px;
+    overflow: auto;
+    margin: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--rp-border);
+    border-radius: 5px;
+    background: var(--rp-console-bg);
+    color: var(--rp-console-text);
+    font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+    font-size: 9.5px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+}
+#repair-panel .repair-order-line.lv-ok { color: #63d68b; }
+#repair-panel .repair-order-line.lv-error { color: #ff7b7b; }
+#repair-panel .repair-order-line.lv-dim { color: #8fa0b2; }
 #repair-panel[data-repair-mode="settings"] .repair-actions,
 #repair-panel[data-repair-mode="settings"] .repair-stats,
 #repair-panel[data-repair-mode="settings"] .repair-body,

@@ -23,7 +23,7 @@
 // every operation in storage/journal.jsonl so a batch can be undone.
 
 exports.repo = "hugo529100/hfs-Plugins-Repair"
-exports.version = 1.86
+exports.version = 2.08
 exports.apiRequired = [12.7, 13.72]
 exports.description = 'Analyze and repair the installed plugin library: three-way check between online catalog, plugin folders and config.yaml, seamless config migration, safe folder renames, plugin.js repo fixes and trash-based deletion.'
 exports.preview = []
@@ -1349,6 +1349,33 @@ exports.init = async api => {
                     })
                 }
             }
+        } else if (cmp === 0) {
+            const updateRepo = checked?.repo || item.target.repo || item.repo
+            const urls = []
+            const addUrl = (repo, branch, file) => {
+                if (!repo) return
+                const u = `https://raw.githubusercontent.com/${repo}/${branch}/${file}`
+                if (!urls.includes(u)) urls.push(u)
+            }
+            if (checked?.branch && checked?.file) addUrl(updateRepo, checked.branch, checked.file)
+            for (const branch of [checked?.branch, 'main', 'master'].filter(Boolean))
+                for (const file of ['dist/plugin.js', 'plugin.js']) addUrl(updateRepo, branch, file)
+            if (item.online.version != null && urls.length) {
+                item.fixes.push({
+                    type: 'update',
+                    reinstall: true,
+                    auto: false,
+                    optional: true,
+                    label: `Reinstall online v${item.online.version}`,
+                    before: item.version,
+                    after: item.online.version,
+                    repo: updateRepo,
+                    branch: checked?.branch || 'main',
+                    file: checked?.file || 'plugin.js',
+                    urls,
+                    detail: `Download a fresh plugin.js v${item.online.version} from ${updateRepo}, replace the local file and keep a backup`,
+                })
+            }
         } else if (cmp === -1) {
             item.tags.push('local-older')
             item.tags.push('update-available')
@@ -2017,7 +2044,7 @@ exports.init = async api => {
         let body = null
         let usedUrl = null
         for (const url of fix.urls || []) {
-            const cached = readOptimizerCache(url, 'GET', 24 * 3600 * 1000)
+            const cached = fix.reinstall ? null : readOptimizerCache(url, 'GET', 24 * 3600 * 1000)
             const r = cached || await httpsText(url, { timeout: 20000 })
             if (r.status === 200 && r.body && /exports\.version/.test(r.body)) {
                 body = r.body
@@ -2027,11 +2054,13 @@ exports.init = async api => {
         }
         if (!body) return { ok: false, error: 'could not download an online plugin.js' }
         const meta = parsePluginMeta(body)
-        if (fix.force) {
-            if (String(meta.version) === String(fromVersion))
-                return { ok: false, error: `online version equals local v${fromVersion}` }
-        } else if (compareVersion(meta.version, fromVersion) !== 1) {
-            return { ok: false, error: `online v${meta.version ?? '?'} is not newer than local v${fromVersion}` }
+        if (!fix.reinstall) {
+            if (fix.force) {
+                if (String(meta.version) === String(fromVersion))
+                    return { ok: false, error: `online version equals local v${fromVersion}` }
+            } else if (compareVersion(meta.version, fromVersion) !== 1) {
+                return { ok: false, error: `online v${meta.version ?? '?'} is not newer than local v${fromVersion}` }
+            }
         }
         const bak = backupPluginJs(item)
         const file = path.join(PLUGINS_ROOT, item.folder, 'plugin.js')
@@ -2802,6 +2831,83 @@ exports.init = async api => {
         return { ok: true, mode, ...result, backups: backupStats() }
     }
 
+    function loadOrderInfo() {
+        const cfg = readConfigModel()
+        const items = cfg?.doc?.enable?.items || []
+        const seen = new Set()
+        const entries = []
+        for (const item of items) {
+            if (seen.has(item.value)) continue
+            seen.add(item.value)
+            const dir = path.join(PLUGINS_ROOT, item.value)
+            const file = path.join(dir, 'plugin.js')
+            let version = null
+            let mtime = null
+            try {
+                mtime = fs.statSync(file).mtimeMs
+                version = parsePluginMeta(readText(file)).version
+            } catch {}
+            entries.push({
+                id: item.value,
+                missing: !isDir(dir),
+                version,
+                mtime,
+            })
+        }
+        return { entries, config: CONFIG_PATH }
+    }
+
+    async function restLoadOrder(params, ctx) {
+        assertAdmin(ctx)
+        return { ok: true, ...loadOrderInfo() }
+    }
+
+    async function restSaveLoadOrder(params, ctx) {
+        assertAdmin(ctx)
+        const requested = Array.isArray(params?.order) ? params.order.map(String) : []
+        const cfg = readConfigModel()
+        if (!cfg?.doc?.enable) throw Error('enable_plugins block not found')
+        const items = cfg.doc.enable.items
+        const current = items.map(i => i.value)
+        const unique = [...new Set(current)]
+        if (!requested.length) throw Error('Empty plugin order')
+        for (const id of requested) {
+            if (!unique.includes(id)) throw Error(`Unknown enable_plugins entry: ${id}`)
+        }
+        for (const id of unique) {
+            if (!requested.includes(id)) throw Error(`Missing enable_plugins entry: ${id}`)
+        }
+        const rawsByValue = new Map()
+        for (const item of items) {
+            if (!rawsByValue.has(item.value)) rawsByValue.set(item.value, [])
+            rawsByValue.get(item.value).push(item.raw)
+        }
+        const orderedRaws = []
+        for (const id of requested) {
+            const list = rawsByValue.get(id) || []
+            if (list.length) orderedRaws.push(list.shift())
+        }
+        for (const id of unique) {
+            for (const raw of rawsByValue.get(id) || []) orderedRaws.push(raw)
+        }
+        if (orderedRaws.length !== items.length) throw Error('Plugin order count mismatch')
+        const lines = cfg.doc.lines.slice()
+        items.forEach((item, i) => { lines[item.line] = orderedRaws[i] })
+        const text = lines.join(cfg.doc.eol || '\n')
+        const check = parseDoc(text)
+        const after = check?.enable?.items?.map(i => i.value) || []
+        if (after.length !== current.length) throw Error('enable_plugins verification failed')
+        const bak = writeConfigText(text)
+        const live = liveEnableList()
+        if (Array.isArray(live)) {
+            const ordered = [...requested]
+            for (const id of unique) if (!ordered.includes(id)) ordered.push(id)
+            live.splice(0, live.length, ...ordered)
+        }
+        const info = loadOrderInfo()
+        return { ok: true, ...info, backup: bak, order: requested }
+    }
+
     async function restUndo(params, ctx) {
         assertAdmin(ctx)
         const job = createJob('undo')
@@ -2882,6 +2988,75 @@ exports.init = async api => {
     const autoBackupKick = setTimeout(maybeAutoBackup, 5000)
     autoBackupKick.unref?.()
 
+    async function retryDependencyFailures() {
+        let mgr
+        try { mgr = api.require('./plugins') } catch { return }
+        if (!mgr?.isPluginRunning || !mgr?.getPluginInfo) return
+        const enabled = () => liveEnableList()
+
+        async function ensureDependency(repo, version, seen = new Set()) {
+            if (!repo || seen.has(repo)) return false
+            seen.add(repo)
+            let p
+            try { p = mgr.findPluginByRepo(repo) } catch { return false }
+            if (!p?.id) return false
+            const id = p.id
+            let info
+            try { info = mgr.getPluginInfo(id) } catch { info = null }
+            for (const nested of Array.isArray(info?.depend) ? info.depend : []) {
+                if (!await ensureDependency(nested.repo, nested.version, seen)) return false
+            }
+            if (!enabled().includes(id)) {
+                try { mgr.enablePlugin(id, true) } catch (e) {
+                    api.log(`Plugins Repair: cannot enable dependency ${id}: ${e?.message || e}`)
+                    return false
+                }
+            }
+            if (!mgr.isPluginRunning(id)) {
+                try {
+                    api.log(`Plugins Repair: starting dependency ${id} for ${repo}`)
+                    await mgr.startPlugin(id)
+                } catch (e) {
+                    api.log(`Plugins Repair: dependency ${id} failed to start: ${e?.message || e}`)
+                    return false
+                }
+            }
+            const now = mgr.getPluginInfo(id)
+            if (version != null && Number(now?.version) < Number(version)) {
+                api.log(`Plugins Repair: dependency ${id} is v${now?.version}, required v${version}`)
+                return false
+            }
+            return mgr.isPluginRunning(id)
+        }
+
+        for (const id of enabled()) {
+            if (id === PLUGIN_ID) continue
+            let info
+            try { info = mgr.getPluginInfo(id) } catch { continue }
+            if (!info || mgr.isPluginRunning(id)) continue
+            if (!/missing dependencies/i.test(String(info.error || ''))) continue
+            const deps = Array.isArray(info.depend) ? info.depend : []
+            if (!deps.length) continue
+            let ready = true
+            for (const dep of deps) {
+                if (!await ensureDependency(dep.repo, dep.version)) { ready = false; break }
+            }
+            if (!ready) continue
+            try {
+                await mgr.startPlugin(id)
+                api.log(`Plugins Repair: retried ${id} after its dependencies started`)
+            } catch (e) {
+                api.log(`Plugins Repair: retry failed for ${id}: ${e?.message || e}`)
+            }
+        }
+    }
+
+    const retryDependencyTimers = [6000, 15000, 30000].map(ms => {
+        const t = setTimeout(retryDependencyFailures, ms)
+        t.unref?.()
+        return t
+    })
+
     return {
         middleware,
         customRest: {
@@ -2894,6 +3069,8 @@ exports.init = async api => {
             pluginsRepair_prelude: restPrelude,
             pluginsRepair_settings: restSettings,
             pluginsRepair_saveSettings: restSaveSettings,
+            pluginsRepair_loadOrder: restLoadOrder,
+            pluginsRepair_saveLoadOrder: restSaveLoadOrder,
             pluginsRepair_backupNow: restBackupNow,
             pluginsRepair_backupCleanup: restBackupCleanup,
             pluginsRepair_undo: restUndo,
@@ -2903,6 +3080,7 @@ exports.init = async api => {
             jobs.clear()
             try { clearInterval(autoBackupTimer) } catch {}
             try { clearTimeout(autoBackupKick) } catch {}
+            for (const t of retryDependencyTimers) { try { clearTimeout(t) } catch {} }
         },
     }
 }
