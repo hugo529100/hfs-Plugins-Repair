@@ -340,6 +340,29 @@
         sidebarObserver.observe(list, { childList: true })
     }
 
+    function installNativeUpdateErrorFilter() {
+        let scheduled = false
+        const scan = () => {
+            scheduled = false
+            for (const el of $$('[role="alert"], .MuiAlert-root, .MuiSnackbar-root')) {
+                if (el.closest('#repair-toast-host, #repair-panel')) continue
+                const text = el.textContent || ''
+                if (!/github_quota|ECONNRESET/i.test(text)) continue
+                el.classList.add('repair-native-error-hidden')
+            }
+        }
+        const schedule = () => {
+            if (scheduled) return
+            scheduled = true
+            requestAnimationFrame(scan)
+        }
+        const root = document.documentElement
+        if (!root) return
+        new MutationObserver(schedule).observe(root, { childList: true, subtree: true })
+        scan()
+    }
+    installNativeUpdateErrorFilter()
+
     function ensureSidebarEntry() {
         const name = document.querySelector('#hfs-name')
         const list = name?.closest('ul')

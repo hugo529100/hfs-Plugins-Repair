@@ -23,13 +23,11 @@
 // every operation in storage/journal.jsonl so a batch can be undone.
 
 exports.repo = "hugo529100/hfs-Plugins-Repair"
-exports.version = 2.22
-exports.apiRequired = [12.7, 13.73]
+exports.version = 2.23
+exports.apiRequired = 12.7
 exports.description = 'Analyze and repair the installed plugin library: three-way check between online catalog, plugin folders and config.yaml, seamless config migration, safe folder renames, plugin.js repo fixes and trash-based deletion.'
 exports.preview = []
-exports.changelog = [
-    { version: 2.22, message: 'Support the HFS 3.4.2 plugin API (13.73).' },
-]
+exports.changelog = []
 
 exports.config = {
     deepOnlineByDefault: {

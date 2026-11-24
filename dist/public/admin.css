@@ -1,6 +1,7 @@
 /* Plugins Repair - admin panel styles
  * Scoped under #repair-panel so HFS/MUI themes cannot leak in or out.
  */
+.repair-native-error-hidden { display: none !important; }
 #repair-panel.repair-panel {
     --rp-bg: #fbfcfe;    --rp-panel: #ffffff;
     --rp-raised: #f2f5f9;
