@@ -23,11 +23,13 @@
 // every operation in storage/journal.jsonl so a batch can be undone.
 
 exports.repo = "hugo529100/hfs-Plugins-Repair"
-exports.version = 2.08
-exports.apiRequired = [12.7, 13.72]
+exports.version = 2.22
+exports.apiRequired = [12.7, 13.73]
 exports.description = 'Analyze and repair the installed plugin library: three-way check between online catalog, plugin folders and config.yaml, seamless config migration, safe folder renames, plugin.js repo fixes and trash-based deletion.'
 exports.preview = []
-exports.changelog = []
+exports.changelog = [
+    { version: 2.22, message: 'Support the HFS 3.4.2 plugin API (13.73).' },
+]
 
 exports.config = {
     deepOnlineByDefault: {
@@ -838,6 +840,34 @@ exports.init = async api => {
         }
     }
 
+    async function readNativeCatalog() {
+        try {
+            const mod = api.require('./pluginCatalog')
+            if (!mod?.getPluginCatalog) return null
+            const it = mod.getPluginCatalog()
+            const first = await it.next()
+            if (first.done || !first.value) return null
+            const snapshot = first.value
+            const entries = []
+            for (const row of snapshot.entries || []) {
+                const pl = row?.plugin
+                const repo = row?.repository?.full_name || pl?.repo
+                if (!pl || !repo) continue
+                entries.push({
+                    id: repo,
+                    repo,
+                    version: pl.version ?? null,
+                    apiRequired: pl.apiRequired ?? null,
+                    description: pl.description || row.repository?.description || '',
+                    branch: pl.branch || row.repository?.default_branch || 'main',
+                    default_branch: row.repository?.default_branch || pl.branch || 'main',
+                    pushed_at: row.repository?.pushed_at || null,
+                })
+            }
+            return { entries, updatedAt: Number(snapshot.updatedAt) || null, source: 'HFS native catalog' }
+        } catch { return null }
+    }
+
     async function loadOnlineCatalog({ refresh = false, search = true } = {}) {
         if (onlineState.loading) return onlineState.loading
         onlineState.loading = (async () => {
@@ -857,6 +887,15 @@ exports.init = async api => {
                 for (const e of entries) byId.set(String(e.repo || e.id).toLowerCase(), e)
                 entries = [...byId.values()]
                 if (source === 'none') { source = 'cache'; updatedAt = cache.updatedAt || null }
+            }
+
+            // HFS keeps its own plugin catalog for the native "Check updates" page.
+            // Use it when its snapshot is newer than the mirror/cache we already have.
+            const native = await readNativeCatalog()
+            if (native?.entries?.length && native.updatedAt && (!updatedAt || native.updatedAt > updatedAt)) {
+                entries = native.entries
+                source = 'HFS native catalog'
+                updatedAt = native.updatedAt
             }
 
             // A scan must never block on the network: the GitHub search only runs
