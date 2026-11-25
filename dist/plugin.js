@@ -23,7 +23,7 @@
 // every operation in storage/journal.jsonl so a batch can be undone.
 
 exports.repo = "hugo529100/hfs-Plugins-Repair"
-exports.version = 2.23
+exports.version = 2.26
 exports.apiRequired = 12.7
 exports.description = 'Analyze and repair the installed plugin library: three-way check between online catalog, plugin folders and config.yaml, seamless config migration, safe folder renames, plugin.js repo fixes and trash-based deletion.'
 exports.preview = []
@@ -607,6 +607,9 @@ exports.init = async api => {
     // ============================================================
     let onlineState = { entries: [], source: 'none', updatedAt: null, error: null, loading: null }
     let repoCache = readJsonFile(REPO_CACHE, { repos: {} })
+    if (!repoCache || typeof repoCache !== 'object') repoCache = { repos: {} }
+    if (!repoCache.repos || typeof repoCache.repos !== 'object') repoCache.repos = {}
+    if (!repoCache.hfsPrefix || typeof repoCache.hfsPrefix !== 'object') repoCache.hfsPrefix = {}
     const repoCacheDirty = { value: false }
 
     function splitRepo(repo) {
@@ -1078,6 +1081,15 @@ exports.init = async api => {
                 const res = await checkRepo(repo, { optimizerIndex, force: true, candidateRepo })
                     .catch(e => ({ error: e.message, exists: false }))
                 if (res && res.cached) cacheHits++
+                if (res && !res.exists) {
+                    const { owner, name } = splitRepo(repo)
+                    if (owner && name && !/^hfs-/i.test(name)) {
+                        const hfsRepo = `${owner}/hfs-${name}`
+                        const hfsRes = await checkRepo(hfsRepo, { optimizerIndex, force: true })
+                            .catch(() => null)
+                        if (hfsRes?.exists) repoCache.hfsPrefix[repo.toLowerCase()] = hfsRepo
+                    }
+                }
                 done++
                 if (done % 20 === 0) jobLog(job, 'dim', `Deep check ${done}/${unique.length} ...`)
             }
@@ -1271,6 +1283,27 @@ exports.init = async api => {
         } else {
             item.target = { id: folder, repo: item.repo, source: 'none', confidence: 'none' }
         }
+        // A repo name without the conventional hfs- prefix may be the wrong
+        // repository entirely. If the same owner publishes owner/hfs-<name>,
+        // prefer it even when the unprefixed repo also exists.
+        if (item.repo) {
+            const { owner, name } = splitRepo(item.repo)
+            if (owner && name && !/^hfs-/i.test(name)) {
+                const hfsRepo = `${owner}/hfs-${name}`
+                const hfsEntry = ctx.index?.byRepo?.get(hfsRepo.toLowerCase())
+                if (hfsEntry) {
+                    item.target = {
+                        id: name,
+                        repo: String(hfsEntry.repo || hfsEntry.id || hfsRepo),
+                        source: 'hfs-prefix',
+                        confidence: 'alias',
+                        onlineId: hfsEntry.id,
+                    }
+                    item.tags.push('repo-missing-hfs')
+                    item.notes.push(`Repository uses the hfs- convention: ${hfsRepo}`)
+                }
+            }
+        }
         // A deep raw-plugin.js probe may have found the repo under a small name
         // variant (owner alias, hfs- prefix on/off). Prefer that canonical URL.
         if (item.target.source === 'none' && item.repo) {
@@ -1280,6 +1313,13 @@ exports.init = async api => {
                 const targetId = repoName.replace(/^hfs-/, '') || repoName
                 item.target = { id: targetId, repo: deep.repo, source: 'deep', confidence: 'alias' }
                 item.notes.push(`Online probe found ${deep.repo}${deep.version != null ? ' (v' + deep.version + ')' : ''}`)
+            }
+            const hfsRepo = repoCache.hfsPrefix[String(item.repo).toLowerCase()]
+            if (hfsRepo) {
+                const repoName = splitRepo(hfsRepo).name
+                item.target = { id: repoName.replace(/^hfs-/, '') || repoName, repo: hfsRepo, source: 'deep-hfs', confidence: 'alias' }
+                item.tags.push('repo-missing-hfs')
+                item.notes.push(`Deep probe found the hfs- repository ${hfsRepo}`)
             }
         }
 
@@ -1299,7 +1339,8 @@ exports.init = async api => {
             item.fixes.push({
                 type: 'repo',
                 auto: true,
-                label: ownerAlias ? 'Fix repo owner' : 'Fix exports.repo',
+                label: item.tags.includes('repo-missing-hfs') ? 'Fix missing hfs- prefix'
+                    : ownerAlias ? 'Fix repo owner' : 'Fix exports.repo',
                 before: item.repo,
                 after: targetRepo,
                 detail: ownerAlias
@@ -3049,14 +3090,16 @@ exports.init = async api => {
                     return false
                 }
             }
-            if (!mgr.isPluginRunning(id)) {
-                try {
-                    api.log(`Plugins Repair: starting dependency ${id} for ${repo}`)
-                    await mgr.startPlugin(id)
-                } catch (e) {
-                    api.log(`Plugins Repair: dependency ${id} failed to start: ${e?.message || e}`)
-                    return false
-                }
+            // A dependency can be "running" yet still be reported as missing by
+            // HFS (disabled/stopped/version state). Restart it explicitly before
+            // trying any dependent plugin again.
+            try {
+                api.log(`Plugins Repair: restarting dependency ${id} for ${repo}`)
+                if (mgr.isPluginRunning(id)) await mgr.stopPlugin(id)
+                await mgr.startPlugin(id)
+            } catch (e) {
+                api.log(`Plugins Repair: dependency ${id} failed to restart: ${e?.message || e}`)
+                return false
             }
             const now = mgr.getPluginInfo(id)
             if (version != null && Number(now?.version) < Number(version)) {
