@@ -1808,8 +1808,8 @@
         const orphans = [...(state.report.orphans?.config || []), ...(state.report.orphans?.enable || []), ...(state.report.orphans?.keys || [])]
         if (k === 'all') return items.filter(i => !ignored(i) && !notPub(i)).length
         if (k === 'orphans') return orphans.filter(i => !ignored(i)).length
-        if (k === 'ignored') return all.filter(i => ignored(i) && !notPub(i)).length
-        if (k === 'not-found') return items.filter(i => i.tags?.includes('online-not-found') || notPub(i)).length
+        if (k === 'ignored') return all.filter(i => ignored(i)).length
+        if (k === 'not-found') return items.filter(i => !ignored(i) && (i.tags?.includes('online-not-found') || notPub(i))).length
         if (k === 'update') return items.filter(i => !ignored(i) && !notPub(i) && i.tags?.includes('update-available')).length
         return items.filter(i => !ignored(i) && !notPub(i) && i.severity === k).length
     }
@@ -1822,8 +1822,8 @@
         const notPub = it => it.tags?.includes('not-published')
         const orphans = [...(state.report.orphans?.config || []), ...(state.report.orphans?.enable || []), ...(state.report.orphans?.keys || [])]
         if (state.filter === 'orphans') return orphans.filter(i => !ignored(i))
-        if (state.filter === 'ignored') return all.filter(i => ignored(i) && !notPub(i))
-        if (state.filter === 'not-found') return items.filter(i => i.tags?.includes('online-not-found') || notPub(i))
+        if (state.filter === 'ignored') return all.filter(i => ignored(i))
+        if (state.filter === 'not-found') return items.filter(i => !ignored(i) && (i.tags?.includes('online-not-found') || notPub(i)))
         if (state.filter === 'update') return items.filter(i => !ignored(i) && !notPub(i) && i.tags?.includes('update-available'))
         if (state.filter === 'all') return items.filter(i => !ignored(i) && !notPub(i))
         return items.filter(i => !ignored(i) && !notPub(i) && i.severity === state.filter)
