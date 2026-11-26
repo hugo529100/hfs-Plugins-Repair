@@ -1,29 +1,29 @@
-// plugin.js - Plugins Repair
-//
-// Goal: make an HFS3 plugin library consistent again after plugins were enabled
-// straight from GitHub source archives (folder named `<repo>-main`, repo owner
-// spelled `Hug3O`, config.yaml sections keyed by the old folder name, ...).
-//
-// What it does
-//   1) scans every folder under plugins/ and reads its plugin.js metadata
-//      (exports.repo / exports.version / exports.apiRequired);
-//   2) reads config.yaml (plugins_config + enable_plugins) without reformatting it;
-//   3) compares all of that with the online plugin catalog (Plugins-Optimizer's
-//      catalog.json mirror, optionally live GitHub checks);
-//   4) shows the result in an "ANALYZE & REPAIR" tab of the Installed plugins page:
-//      a live analysis console, health statistics and one decision card per plugin
-//      (fix / ignore / delete) with a before/after preview;
-//   5) applies the selected decisions safely: config.yaml is backed up and edited
-//      line-by-line, plugin.js is backed up before `exports.repo` is rewritten,
-//      folders are renamed with their config section + enable entry migrated, and
-//      deletions move the folder to a local trash instead of erasing it.
-//
-// The plugin never renames a folder it cannot map to a real online repository,
-// never touches a running plugin unless it has to (rename/delete), and records
-// every operation in storage/journal.jsonl so a batch can be undone.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 exports.repo = "hugo529100/hfs-Plugins-Repair"
-exports.version = 2.26
+exports.version = 2.41
 exports.apiRequired = 12.7
 exports.description = 'Analyze and repair the installed plugin library: three-way check between online catalog, plugin folders and config.yaml, seamless config migration, safe folder renames, plugin.js repo fixes and trash-based deletion.'
 exports.preview = []
@@ -68,8 +68,8 @@ exports.init = async api => {
     const crypto = api.require('crypto')
     const https = api.require('https')
 
-    // Undocumented but stable in HFS 3.4.1: the plugin manager itself.
-    // It lets us stop/enable/start/rescan without waiting for a server restart.
+    
+    
     const hfsPlugins = (() => {
         try {
             const m = api.require('./plugins')
@@ -99,7 +99,7 @@ exports.init = async api => {
     const BACKUP_IN_SELF = path.join(storageDir, 'backups')
     const CANONICAL_OWNER = 'hugo529100'
     const OWNER_ALIASES = new Set(['hug3o', 'hugo29100', 'hugo529100'])
-    // HFS-native plugins: never treat them as library plugins.
+    
     const NATIVE_PLUGINS = new Set(['antibrute', 'download-counter', 'list-uploader'])
     const ADMIN_TOKEN = crypto.randomBytes(24).toString('hex')
 
@@ -109,9 +109,9 @@ exports.init = async api => {
     }
     const logDebug = (...a) => { if (debugEnabled()) api.log('[repair]', ...a) }
 
-    // ============================================================
-    //  Filesystem helpers
-    // ============================================================
+    
+    
+    
     const exists = p => { try { return fs.existsSync(p) } catch { return false } }
     const isDir = p => { try { return fs.statSync(p).isDirectory() } catch { return false } }
     const readText = p => fs.readFileSync(p, 'utf8')
@@ -151,9 +151,9 @@ exports.init = async api => {
         } catch (e) { logDebug('journal failed', e.message) }
     }
 
-    // ============================================================
-    //  config.yaml: line-preserving model
-    // ============================================================
+    
+    
+    
     function splitRecords(text) {
         const out = []
         let pos = 0
@@ -192,7 +192,7 @@ exports.init = async api => {
         const lines = records.map(r => r.text)
         const doc = { records, lines, plugins: null, enable: null, eol: dominantEol(records) }
 
-        // ---- top-level blocks ----
+        
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i]
             if (!line || line[0] === ' ' || line[0] === '\t') continue
@@ -210,7 +210,7 @@ exports.init = async api => {
             return lines.length
         }
 
-        // ---- enable_plugins list ----
+        
         if (doc.enable) {
             const end = blockEnd(doc.enable.keyLine)
             const items = []
@@ -222,7 +222,7 @@ exports.init = async api => {
             doc.enable = { ...doc.enable, start: doc.enable.keyLine + 1, end, items }
         }
 
-        // ---- plugins_config sections ----
+        
         if (doc.plugins) {
             const end = blockEnd(doc.plugins.keyLine)
             const sections = []
@@ -279,7 +279,7 @@ exports.init = async api => {
         return true
     }
 
-    // Remove [start, end) but keep trailing blank/comment lines that belong to the layout.
+    
     function trimSectionTail(lines, start, end) {
         let e = end
         while (e > start + 1) {
@@ -291,10 +291,10 @@ exports.init = async api => {
     }
 
     function planConfigOps(doc, ops) {
-        // Work on a copy of the line texts, then re-attach the original EOLs by index
-        // (every edit only replaces/removes/inserts whole lines, never changes EOLs).
+        
+        
         const lines = doc.lines.slice()
-        const inserted = new Map() // index -> lines inserted before that index
+        const inserted = new Map() 
         const removed = new Set()
         const touched = new Set()
         const notes = []
@@ -321,7 +321,7 @@ exports.init = async api => {
                     blocks.push({ lines: lines.slice(e.line, end) })
                     dstKeys.add(e.key)
                 }
-                // target may be an inline "null" with no entries
+                
                 if (dst.entries.length === 0 && /^null\s*(#.*)?$/.test(String(dst.value).trim())) {
                     lines[dst.keyLine] = lines[dst.keyLine].replace(/\s*:.*$/, ':')
                 }
@@ -332,7 +332,7 @@ exports.init = async api => {
                     notes.push(`merged ${blocks.length} key(s) from ${op.from}`)
                 }
                 removeRange(lines, src.startLine, trimSectionTail(lines, src.startLine, src.endLine))
-                // indexes shifted: restart the whole plan from the new text
+                
                 return planConfigOps(parseDoc(rebuild(lines, inserted, removed, doc.eol)), ops.slice(ops.indexOf(op) + 1))
             } else if (op.type === 'removeSections') {
                 for (const key of op.keys || []) {
@@ -430,9 +430,9 @@ exports.init = async api => {
         return null
     }
 
-    // ============================================================
-    //  Backup / write config
-    // ============================================================
+    
+    
+    
     function uniquePath(dir, base, ext) {
         ensureDir(dir)
         for (let n = 0; n < 200; n++) {
@@ -552,9 +552,9 @@ exports.init = async api => {
         }
     }
 
-    // ============================================================
-    //  Live config (HFS memory) sync
-    // ============================================================
+    
+    
+    
     function livePluginsConfig() {
         try { return api.getHfsConfig('plugins_config') } catch { return null }
     }
@@ -602,9 +602,9 @@ exports.init = async api => {
         }
     }
 
-    // ============================================================
-    //  Online catalog
-    // ============================================================
+    
+    
+    
     let onlineState = { entries: [], source: 'none', updatedAt: null, error: null, loading: null }
     let repoCache = readJsonFile(REPO_CACHE, { repos: {} })
     if (!repoCache || typeof repoCache !== 'object') repoCache = { repos: {} }
@@ -622,7 +622,7 @@ exports.init = async api => {
         || (OWNER_ALIASES.has(String(a || '').toLowerCase()) && OWNER_ALIASES.has(String(b || '').toLowerCase()))
     const normOwner = o => OWNER_ALIASES.has(String(o || '').toLowerCase()) ? CANONICAL_OWNER : String(o || '')
 
-    // Candidate spellings for a repository: owner alias, hfs- prefix on/off.
+    
     function repoVariants(repo) {
         const { owner, name } = splitRepo(repo)
         if (!owner || !name) return []
@@ -676,10 +676,10 @@ exports.init = async api => {
         }
     }
 
-    // ---- Plugins-Optimizer cache bridge -------------------------------------
-    // The optimizer caches GitHub API/raw responses under storage/cache/<sha1[0..16]>
-    // with the same URL normalization it uses for its own requests. Reusing those
-    // entries means deep checks do not hit GitHub again and work while rate-limited.
+    
+    
+    
+    
     const OPTIMIZER_CACHE_BUST = new Set(['t', '_', 'timestamp', 'cachebust', 'v', 'ver', 'version'])
     function optimizerNormalizeEnabled() {
         try {
@@ -720,9 +720,9 @@ exports.init = async api => {
         } catch { return null }
     }
 
-    // Cache entries do not record their URL, so index them by exports.repo.
-    // This lets deep checks reuse the optimizer's cached plugin.js even when its
-    // hash-key version differs from ours.
+    
+    
+    
     function optimizerPluginCacheIndex(maxAgeMs = 6 * 3600 * 1000) {
         const out = new Map()
         try {
@@ -755,10 +755,17 @@ exports.init = async api => {
         return out
     }
 
-    function httpsText(url, { timeout = 15000, headers = {} } = {}) {
+    function httpsText(url, { timeout = 15000, headers = {}, signal = null } = {}) {
         return new Promise(resolve => {
             let settled = false
-            const done = v => { if (!settled) { settled = true; resolve(v) } }
+            let onAbort = null
+            const done = v => {
+                if (settled) return
+                settled = true
+                if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort) } catch {} }
+                resolve(v)
+            }
+            if (signal?.aborted) return done({ status: 0, body: '', error: 'aborted' })
             try {
                 const req = https.get(url, {
                     headers: {
@@ -778,14 +785,18 @@ exports.init = async api => {
                     res.on('end', () => done({ status: res.statusCode || 0, body: Buffer.concat(chunks).toString('utf8') }))
                     res.on('error', e => done({ status: 0, body: '', error: e.message }))
                 })
+                if (signal) {
+                    onAbort = () => { try { req.destroy() } catch {}; done({ status: 0, body: '', error: 'aborted' }) }
+                    signal.addEventListener('abort', onAbort, { once: true })
+                }
                 req.on('timeout', () => { try { req.destroy() } catch {}; done({ status: 0, body: '', error: 'timeout' }) })
                 req.on('error', e => done({ status: 0, body: '', error: e.message }))
             } catch (e) { done({ status: 0, body: '', error: e.message }) }
         })
     }
 
-    // The public repository list is a cheap non-API cross-check: GitHub's HTML
-    // pages do not consume the REST quota that HFS's "Check updates" uses.
+    
+    
     async function fetchOwnerRepos(owner) {
         const cache = readJsonFile(OWNER_CACHE, { owners: {} })
         const key = String(owner || '').toLowerCase()
@@ -883,15 +894,15 @@ exports.init = async api => {
 
             const cache = readJsonFile(ONLINE_CACHE, null)
             if (cache && Array.isArray(cache.entries)) {
-                // keep the freshest set, mirror wins on duplicates
+                
                 const byId = new Map(cache.entries.map(e => [String(e.repo || e.id).toLowerCase(), e]))
                 for (const e of entries) byId.set(String(e.repo || e.id).toLowerCase(), e)
                 entries = [...byId.values()]
                 if (source === 'none') { source = 'cache'; updatedAt = cache.updatedAt || null }
             }
 
-            // HFS keeps its own plugin catalog for the native "Check updates" page.
-            // Use it when its snapshot is newer than the mirror/cache we already have.
+            
+            
             const native = await readNativeCatalog()
             if (native?.entries?.length && native.updatedAt && (!updatedAt || native.updatedAt > updatedAt)) {
                 entries = native.entries
@@ -899,8 +910,8 @@ exports.init = async api => {
                 updatedAt = native.updatedAt
             }
 
-            // A scan must never block on the network: the GitHub search only runs
-            // when the user explicitly asks to refresh the online list.
+            
+            
             if (refresh && search) {
                 const searchResult = await githubSearch()
                 if (searchResult.entries?.length) {
@@ -957,7 +968,7 @@ exports.init = async api => {
             let score = 0
             if (repo && eRepo.toLowerCase() === String(repo).toLowerCase()) score += 100
             if (sameOwner(eOwner, owner)) score += 30
-            // the installed folder name is the strongest hint when exports.repo is stale
+            
             if (normalizeName(eName) === folderNorm && folderNorm) score += 60
             if (normalizeName(eName) === repoNorm && repoNorm) score += 40
             if (String(eOwner).toLowerCase() === CANONICAL_OWNER) score += 3
@@ -972,7 +983,7 @@ exports.init = async api => {
         return best
     }
 
-    async function checkRepo(repo, { force = false, optimizerIndex = null, candidateRepo = null } = {}) {
+    async function checkRepo(repo, { force = false, optimizerIndex = null, candidateRepo = null, signal = null } = {}) {
         const key = String(repo || '').toLowerCase()
         if (!key) return null
         const cached = repoCache.repos[key]
@@ -1010,9 +1021,9 @@ exports.init = async api => {
             error: null,
             cached: false,
         }
-        // Raw plugin.js probes do not consume the GitHub API quota that HFS's
-        // "Check updates" uses. Try the current name, then small variants
-        // (owner alias, hfs- prefix on/off) before declaring it unpublished.
+        
+        
+        
         for (const candidate of (candidateRepo
             ? [candidateRepo, ...repoVariants(repo).filter(v => v.toLowerCase() !== candidateRepo.toLowerCase())]
             : repoVariants(repo))) {
@@ -1021,7 +1032,7 @@ exports.init = async api => {
                     const url = `https://raw.githubusercontent.com/${candidate}/${branch}/${file}`
                     const cachedRaw = readOptimizerCache(url)
                     if (cachedRaw) out.cached = true
-                    const raw = cachedRaw || await httpsText(url, { timeout: 8000 })
+                    const raw = cachedRaw || await httpsText(url, { timeout: 8000, signal })
                     if (raw.status !== 200 || !raw.body) continue
                     const meta = parsePluginMeta(raw.body)
                     out.exists = true
@@ -1072,20 +1083,21 @@ exports.init = async api => {
         const workers = Array.from({ length: Math.min(6, queue.length) }, async () => {
             while (queue.length) {
                 const repo = queue.shift()
+                if (job.cancelRequested) throw Error('Aborted by user')
                 const ownerLower = splitRepo(repo).owner.toLowerCase()
                 const meta = itemByRepo.get(repo)
                 const candidateRepo = (ownerIndex.size && (OWNER_ALIASES.has(ownerLower) || ownerLower === CANONICAL_OWNER))
                     ? (ownerIndex.get(normalizeName(splitRepo(repo).name))
                         || (meta ? ownerIndex.get(normalizeName(meta.folder)) : null))
                     : null
-                const res = await checkRepo(repo, { optimizerIndex, force: true, candidateRepo })
+                const res = await checkRepo(repo, { optimizerIndex, force: true, candidateRepo, signal: job.signal })
                     .catch(e => ({ error: e.message, exists: false }))
                 if (res && res.cached) cacheHits++
                 if (res && !res.exists) {
                     const { owner, name } = splitRepo(repo)
                     if (owner && name && !/^hfs-/i.test(name)) {
                         const hfsRepo = `${owner}/hfs-${name}`
-                        const hfsRes = await checkRepo(hfsRepo, { optimizerIndex, force: true })
+                        const hfsRes = await checkRepo(hfsRepo, { optimizerIndex, force: true, signal: job.signal })
                             .catch(() => null)
                         if (hfsRes?.exists) repoCache.hfsPrefix[repo.toLowerCase()] = hfsRepo
                     }
@@ -1099,11 +1111,11 @@ exports.init = async api => {
         jobLog(job, 'dim', `Deep check done (${unique.length} repositories, ${cacheHits} served from Plugins-Optimizer cache)`)
     }
 
-    // ============================================================
-    //  plugin.js metadata
-    // ============================================================
-    // Read a local plugin's declared config keys, like Config-clean does, so
-    // settings that the current plugin version no longer declares can be shown.
+    
+    
+    
+    
+    
     const declaredKeysCache = new Map()
     function pluginDeclaredKeys(folder) {
         const file = path.join(PLUGINS_ROOT, folder, 'plugin.js')
@@ -1158,9 +1170,9 @@ exports.init = async api => {
         return 0
     }
 
-    // ============================================================
-    //  Scan
-    // ============================================================
+    
+    
+    
     function readConfigModel() {
         if (!exists(CONFIG_PATH)) return null
         const text = readText(CONFIG_PATH).replace(/^\uFEFF/, '')
@@ -1259,10 +1271,10 @@ exports.init = async api => {
             item.notes.push('plugin.js does not declare exports.repo')
         }
 
-        // ---- target id from the online catalog ----
-        // HFS installs a plugin into a folder named after the repository, minus a
-        // leading "hfs-" (src/github.ts: short.replace(/^hfs-/, '')), and only uses
-        // "owner-repo" when that folder name is already taken.
+        
+        
+        
+        
         const picked = item.repo ? pickOnline(ctx.index, folder, item.repo) : null
         if (picked) {
             const e = picked.entry
@@ -1283,9 +1295,9 @@ exports.init = async api => {
         } else {
             item.target = { id: folder, repo: item.repo, source: 'none', confidence: 'none' }
         }
-        // A repo name without the conventional hfs- prefix may be the wrong
-        // repository entirely. If the same owner publishes owner/hfs-<name>,
-        // prefer it even when the unprefixed repo also exists.
+        
+        
+        
         if (item.repo) {
             const { owner, name } = splitRepo(item.repo)
             if (owner && name && !/^hfs-/i.test(name)) {
@@ -1304,8 +1316,8 @@ exports.init = async api => {
                 }
             }
         }
-        // A deep raw-plugin.js probe may have found the repo under a small name
-        // variant (owner alias, hfs- prefix on/off). Prefer that canonical URL.
+        
+        
         if (item.target.source === 'none' && item.repo) {
             const deep = repoCache.repos[String(item.repo).toLowerCase()]
             if (deep?.exists && deep.repo && deep.repo.toLowerCase() !== item.repo.toLowerCase()) {
@@ -1323,7 +1335,7 @@ exports.init = async api => {
             }
         }
 
-        // ---- repo owner / name fixes ----
+        
         const targetRepo = item.target.source !== 'none'
             ? item.target.repo
             : (item.repoOwner ? normOwner(item.repoOwner) + '/' + item.repoName : item.repo)
@@ -1349,7 +1361,7 @@ exports.init = async api => {
             })
         }
 
-        // ---- folder naming ----
+        
         if (item.target.source !== 'none') {
             if (item.target.id !== folder) {
                 const caseOnly = item.target.id.toLowerCase() === folder.toLowerCase()
@@ -1376,7 +1388,7 @@ exports.init = async api => {
             item.notes.push(`Folder name ${folder} differs from repository name ${item.repoName}`)
         }
 
-        // ---- version ----
+        
         const onlineKey = String(item.target.repo || item.repo || '').toLowerCase()
         const onlineVersion = ctx.onlineByRepo.get(onlineKey)?.version
             ?? ctx.onlineByRepo.get(String(item.repo).toLowerCase())?.version
@@ -1395,10 +1407,10 @@ exports.init = async api => {
         const cmp = compareVersion(item.version, item.online.version)
         if (cmp === 1) {
             item.tags.push('local-newer')
-            // A local version ahead of GitHub means unpublished local changes.
+            
             item.tags.push('not-published')
-            // Even when semver says local is newer, allow explicitly adopting the
-            // online file (e.g. a dev build marked 0.31 while GitHub uses 0.4).
+            
+            
             if (item.online.version != null && String(item.online.version) !== String(item.version)) {
                 const updateRepo = checked?.repo || item.target.repo || item.repo
                 const urls = []
@@ -1484,7 +1496,7 @@ exports.init = async api => {
             }
         }
 
-        // ---- config.yaml ----
+        
         const cfg = ctx.config
         if (cfg) {
             const targetId = item.target.id || folder
@@ -1496,7 +1508,7 @@ exports.init = async api => {
                 const n = normalizeName(s.key)
                 if (!n) return false
                 if (n !== normalizeName(folder) && n !== normalizeName(targetId)) return false
-                // never steal a section that is the exact id of another installed folder
+                
                 return !ctx.folders.some(f => f !== folder && f === s.key)
             })
             let variants = [...caseVariant, ...alias]
@@ -1506,8 +1518,8 @@ exports.init = async api => {
             const targetExists = !!cfg.sections.find(s => s.key === targetId)
             const settings = analyzeSettings(cfg, folder, exact, variants, targetId, ctx)
             item.settings = settings
-            // When there is no live section, the selected master must be the first
-            // section that gets renamed to the target key; the others are merged in.
+            
+            
             if (!exact && settings.masterKey) {
                 variants = [...variants].sort((a, b) =>
                     a.key === settings.masterKey ? -1 : b.key === settings.masterKey ? 1 : 0)
@@ -1545,7 +1557,7 @@ exports.init = async api => {
             }
         }
 
-        // ---- enable_plugins ----
+        
         if (cfg?.enable) {
             const entries = cfg.enable.items.filter(i => i.value === folder || i.value.toLowerCase() === folder.toLowerCase())
             item.enable.entries = entries.map(i => i.value)
@@ -1573,8 +1585,9 @@ exports.init = async api => {
             }
         }
 
-        // ---- severity ----
+        
         item.severity = computeSeverity(item)
+        if (item.tags.includes('not-published')) item.severity = 'healthy'
         return item
     }
 
@@ -1587,10 +1600,10 @@ exports.init = async api => {
         if (item.fixes.some(f => f.type === 'rename' && !f.optional)) return 'need-fix'
         if (item.fixes.some(f => f.type === 'enable')) return 'need-fix'
         if (item.fixes.some(f => f.type === 'update' && !f.optional && !f.force)) return 'need-fix'
-        // Hug3O -> hugo529100 alone is a metadata anomaly: shown under Attention and
-        // fixed per item (with the normal apply confirmation), never in bulk.
+        
+        
         if (item.tags.includes('repo-owner-alias')) return 'attention'
-        if (item.tags.includes('local-newer') || item.tags.includes('local-older')
+        if (item.tags.includes('local-older')
             || item.tags.includes('folder-case-mismatch') || item.tags.includes('folder-name-differs')
             || item.tags.includes('repo-case-mismatch') || item.tags.includes('no-repo')) return 'attention'
         return 'healthy'
@@ -1642,9 +1655,9 @@ exports.init = async api => {
         return ops
     }
 
-    // ============================================================
-    //  Settings-data analysis (mergeability + master data source)
-    // ============================================================
+    
+    
+    
     function cmpVersionInfo(a, b) {
         const A = numericVersion(a), B = numericVersion(b)
         if (A && B) return compareVersion(a, b)
@@ -1894,7 +1907,7 @@ exports.init = async api => {
             }
         }
 
-        // target conflicts (two folders mapping to the same canonical name, or to an existing folder)
+        
         const byTarget = new Map()
         for (const it of items) {
             if (it.target.source === 'none' || it.target.id === it.folder) continue
@@ -1957,7 +1970,7 @@ exports.init = async api => {
             }
         }
 
-        // orphans: config sections not consumed by any plugin
+        
         const consumed = new Set()
         for (const it of items) {
             if (it.config.key) consumed.add(it.config.key)
@@ -1996,8 +2009,8 @@ exports.init = async api => {
                 fixes: [{ type: 'enable-remove', label: 'Remove enable entry', before: i.value, after: '(removed)', detail: `enable_plugins entry ${i.value} has no folder`, auto: false }],
             }))
 
-        // Settings declared by an existing plugin section's own plugin.js no longer
-        // include: leftover keys from older versions (formerly Config-clean).
+        
+        
         const sectionOwner = new Map()
         for (const it of items) {
             if (it.config?.key) sectionOwner.set(it.config.key, it)
@@ -2062,9 +2075,9 @@ exports.init = async api => {
         return String(a.folder).localeCompare(String(b.folder))
     }
 
-    // ============================================================
-    //  Decisions
-    // ============================================================
+    
+    
+    
     let decisionsCache = null
     function loadDecisions() {
         if (decisionsCache) return decisionsCache
@@ -2080,9 +2093,9 @@ exports.init = async api => {
         return d
     }
 
-    // ============================================================
-    //  Apply
-    // ============================================================
+    
+    
+    
     function safeResolvePluginDir(id) {
         const dir = path.join(PLUGINS_ROOT, id)
         if (path.dirname(dir) !== path.resolve(PLUGINS_ROOT)) return null
@@ -2177,7 +2190,7 @@ exports.init = async api => {
         try {
             fs.renameSync(from, to)
         } catch (e) {
-            // different volume or locked: try copy
+            
             fs.cpSync(from, to, { recursive: true })
             fs.rmSync(from, { recursive: true, force: true })
         }
@@ -2205,7 +2218,7 @@ exports.init = async api => {
 
     async function runApply(job, body) {
         const actions = Array.isArray(body.actions) ? body.actions : []
-        const allowRename = true // folder renames are required for GitHub-name alignment
+        const allowRename = true 
         const repoOnly = !!body.repoOnly
         const ownerOnly = !!body.ownerOnly
         const runningIds = new Set((body.runningIds || []).map(String))
@@ -2289,7 +2302,7 @@ exports.init = async api => {
         const results = []
         const undo = { renames: [], repos: [], updates: [], trash: [], configBackup: null, createdAt: Date.now() }
 
-        // ---------- 0) stop the plugins we are going to move/remove/update ----------
+        
         for (const p of plans) {
             if (!(p.rename || p.merge || p.updateFix || p.decision === 'delete')) continue
             if (!p.wasRunning) continue
@@ -2304,7 +2317,7 @@ exports.init = async api => {
             }
         }
 
-        // ---------- 1) online plugin.js updates ----------
+        
         for (const p of plans) {
             if (p.decision === 'delete' || !p.updateFix) continue
             try {
@@ -2325,7 +2338,7 @@ exports.init = async api => {
             }
         }
 
-        // ---------- 2) plugin.js repo rewrite ----------
+        
         for (const p of plans) {
             if (p.decision === 'delete' || !p.repoFix) continue
             try {
@@ -2343,7 +2356,7 @@ exports.init = async api => {
             }
         }
 
-        // ---------- 3) folder renames ----------
+        
         for (const p of plans) {
             if (p.decision === 'delete' || !p.rename || p.error) continue
             try {
@@ -2364,7 +2377,7 @@ exports.init = async api => {
             }
         }
 
-        // ---------- 4) deletions / duplicate merges (move to trash, never erase) ----------
+        
         for (const p of plans) {
             if (p.decision !== 'delete' && !p.merge) continue
             try {
@@ -2383,16 +2396,16 @@ exports.init = async api => {
             }
         }
 
-        // ---------- 4) let HFS pick up the new folder names (do NOT enable yet:
-        //             the config section must be migrated first, otherwise the new
-        //             id would start with defaults and could overwrite settings) ----------
+        
+        
+        
         if (hfsPluginsAvailable) {
             const r = await hfsCall('rescan')
             if (!r.ok) jobLog(job, 'warn', 'Plugin rescan failed: ' + r.error)
             if (undo.renames.length) await sleep(400)
         }
 
-        // ---------- 5) config.yaml (settings migration) ----------
+        
         let cfgModel = readConfigModel()
         const configOps = []
         const merges = []
@@ -2438,8 +2451,8 @@ exports.init = async api => {
             if (p.decision === 'delete') {
                 if (!p.deleted) continue
                 const keys = new Set([p.item.config.key, ...(p.item.config.variants || [])].filter(Boolean))
-                // Items without plugin.js skip config analysis, so match the folder
-                // name against plugins_config directly as a fallback.
+                
+                
                 for (const sec of cfgModel.doc.plugins?.sections || []) {
                     if (sec.key.toLowerCase() === p.item.folder.toLowerCase()) keys.add(sec.key)
                 }
@@ -2513,10 +2526,10 @@ exports.init = async api => {
             }
         }
 
-        // Deletions remove their config sections in the same edit batch above, so
-        // the validation sees the final document and no second write is needed.
+        
+        
 
-        // ---------- 6) config is migrated; now enable/start the renamed plugins ----------
+        
         if ((undo.configBackup || undo.renames.length) && hfsPluginsAvailable) await sleep(900)
         for (const p of plans) {
             if (!p.renamed || !hfsPluginsAvailable) continue
@@ -2541,7 +2554,7 @@ exports.init = async api => {
             }
         }
 
-        // ---------- 7) results + journal ----------
+        
         for (const p of plans) {
             results.push({
                 id: p.item.folder,
@@ -2588,7 +2601,7 @@ exports.init = async api => {
     }
 
     function rollback(undo) {
-        // Conservative rollback of a batch that failed before config.yaml was written.
+        
         for (const r of [...(undo.renames || [])].reverse()) {
             try { fs.renameSync(path.join(PLUGINS_ROOT, r.to), path.join(PLUGINS_ROOT, r.from)) } catch {}
         }
@@ -2607,42 +2620,42 @@ exports.init = async api => {
         const last = readJsonFile(LAST_BATCH_FILE, null)
         if (!last) { jobLog(job, 'warn', 'No batch to undo'); job.result = { ok: false, error: 'nothing to undo' }; return }
         jobLog(job, 'info', 'Undo last batch ...')
-        // 0) stop/disable the names introduced by the batch
+        
         if (hfsPluginsAvailable) {
             for (const r of last.renames || []) {
                 await hfsCall('stopPlugin', r.to)
                 await hfsCall('enablePlugin', r.to, false)
             }
         }
-        // 1) restore plugin.js
+        
         for (const r of last.repos || []) {
             try {
                 fs.copyFileSync(r.backup, path.join(PLUGINS_ROOT, r.id, 'plugin.js'))
                 jobLog(job, 'ok', `Restore plugin.js: ${r.id}`)
             } catch (e) { jobLog(job, 'warn', `Restore plugin.js ${r.id} failed: ${e.message}`) }
         }
-        // 2) reverse renames
+        
         for (const r of [...(last.renames || [])].reverse()) {
             try {
                 fs.renameSync(path.join(PLUGINS_ROOT, r.to), path.join(PLUGINS_ROOT, r.from))
                 jobLog(job, 'ok', `Restore folder: ${r.to} → ${r.from}`)
             } catch (e) { jobLog(job, 'error', `Restore folder ${r.to} failed: ${e.message}`) }
         }
-        // 2b) restore plugin.js backups created by online updates
+        
         for (const u of last.updates || []) {
             try {
                 fs.copyFileSync(u.backup, path.join(PLUGINS_ROOT, u.id, 'plugin.js'))
                 jobLog(job, 'ok', `Restore plugin.js v${u.from}: ${u.id}`)
             } catch (e) { jobLog(job, 'warn', `Restore updated plugin.js ${u.id} failed: ${e.message}`) }
         }
-        // 3) restore trash
+        
         for (const t of [...(last.trash || [])].reverse()) {
             try {
                 fs.renameSync(t.path, path.join(PLUGINS_ROOT, t.id))
                 jobLog(job, 'ok', `Restore deletion: ${t.id}`)
             } catch (e) { jobLog(job, 'error', `Restore deletion ${t.id} failed: ${e.message}`) }
         }
-        // 4) restore config
+        
         if (last.configBackup && exists(last.configBackup)) {
             try {
                 const bakText = readText(last.configBackup)
@@ -2650,7 +2663,7 @@ exports.init = async api => {
                 jobLog(job, 'ok', `Restore config.yaml (${path.basename(last.configBackup)})`)
             } catch (e) { jobLog(job, 'error', 'Restore config.yaml failed: ' + e.message) }
         }
-        // 5) let HFS see the restored folders/config and resume their previous state
+        
         if (hfsPluginsAvailable) {
             await sleep(300)
             await hfsCall('rescan')
@@ -2670,13 +2683,14 @@ exports.init = async api => {
         job.result = { ok: true, undone: true }
     }
 
-    // ============================================================
-    //  Jobs
-    // ============================================================
+    
+    
+    
     const jobs = new Map()
     function createJob(kind) {
         const id = 'j' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex')
-        const job = { id, kind, status: 'running', lines: [], startedAt: Date.now(), finishedAt: null, result: null, error: null }
+        const job = { id, kind, status: 'running', lines: [], startedAt: Date.now(), finishedAt: null, result: null, error: null, cancelRequested: false, controller: new AbortController() }
+        job.signal = job.controller.signal
         jobs.set(id, job)
         for (const [k, v] of jobs) if (jobs.size > 12 && Date.now() - v.startedAt > 3600_000) jobs.delete(k)
         return job
@@ -2703,20 +2717,25 @@ exports.init = async api => {
     async function runJob(job, fn) {
         try {
             await fn()
-            job.status = 'done'
+            job.status = job.cancelRequested ? 'aborted' : 'done'
         } catch (e) {
-            job.error = e.message || String(e)
-            job.status = 'error'
-            jobLog(job, 'error', job.error)
-            logDebug('job failed', e.stack || e)
+            if (job.cancelRequested) {
+                job.status = 'aborted'
+                job.error = null
+            } else {
+                job.error = e.message || String(e)
+                job.status = 'error'
+                jobLog(job, 'error', job.error)
+                logDebug('job failed', e.stack || e)
+            }
         } finally {
-            job.finishedAt = Date.now()
+            if (!job.finishedAt) job.finishedAt = Date.now()
         }
     }
 
-    // ============================================================
-    //  REST
-    // ============================================================
+    
+    
+    
     function adminUsernames() {
         const names = new Set(['admin'])
         try {
@@ -2759,14 +2778,18 @@ exports.init = async api => {
             jobLog(job, 'info', `Scan plugin library: ${PLUGINS_ROOT}`)
             jobLog(job, 'info', `Config: ${CONFIG_PATH}`)
             const online = await loadOnlineCatalog({ refresh: !!params?.refreshOnline })
+            if (job.cancelRequested) throw Error('Aborted by user')
             jobLog(job, 'dim', `Online list: ${online.source}, ${online.entries.length} repositories${online.updatedAt ? ' (updated ' + new Date(online.updatedAt).toLocaleString() + ')' : ''}`)
             const report = await buildReport({ deep: false, runningIds })
+            if (job.cancelRequested) throw Error('Aborted by user')
             jobLog(job, 'dim', `Folders: ${report.items.length}; running: ${runningIds.length}; config sections: ${report.sectionCount}; orphans: ${report.orphans.config.length} config + ${report.orphans.enable.length} enable + ${report.orphans.keys?.length || 0} setting`)
             if (deep) await deepCheck(report.items, job)
+            if (job.cancelRequested) throw Error('Aborted by user')
             if (deep) {
                 const report2 = await buildReport({ deep: true, runningIds })
                 Object.assign(report, report2)
             }
+            if (job.cancelRequested) throw Error('Aborted by user')
             for (const it of report.items) {
                 const tgt = it.target.id !== it.folder ? ` → ${it.target.id}` : ''
                 const fix = it.fixes.length ? '  fixes:' + it.fixes.map(f => f.type).join('+') : ''
@@ -2781,6 +2804,22 @@ exports.init = async api => {
             job.result = report
         })
         return { ok: true, jobId: job.id }
+    }
+
+    async function restAbortJob(params, ctx) {
+        assertAdmin(ctx)
+        const job = jobs.get(String(params?.id || ''))
+        if (!job) throw Error('job not found')
+        if (job.kind !== 'scan') throw Error('this job cannot be aborted')
+        if (job.status === 'running') {
+            job.cancelRequested = true
+            try { job.controller?.abort() } catch {}
+            job.status = 'aborted'
+            job.finishedAt = Date.now()
+            job.result = { ok: false, aborted: true }
+            jobLog(job, 'warn', 'Aborted by user')
+        }
+        return { ok: true, job: jobView(job) }
     }
 
     async function restJob(params, ctx) {
@@ -3011,9 +3050,9 @@ exports.init = async api => {
         }
     }
 
-    // ============================================================
-    //  Admin HTML injection
-    // ============================================================
+    
+    
+    
     function middleware(ctx) {
         if (ctx.method !== 'GET') return
         const assetMatch = String(ctx.path).match(/\/~\/plugins\/Plugins-Repair\/admin\.(js|css)$/)
@@ -3039,9 +3078,9 @@ exports.init = async api => {
         }
     }
 
-    // ============================================================
-    //  Startup
-    // ============================================================
+    
+    
+    
     ensureDir(storageDir)
     ensureDir(BACKUP_IN_SELF)
     const CONFIG_PATH = findConfigFile()
@@ -3090,9 +3129,9 @@ exports.init = async api => {
                     return false
                 }
             }
-            // A dependency can be "running" yet still be reported as missing by
-            // HFS (disabled/stopped/version state). Restart it explicitly before
-            // trying any dependent plugin again.
+            
+            
+            
             try {
                 api.log(`Plugins Repair: restarting dependency ${id} for ${repo}`)
                 if (mgr.isPluginRunning(id)) await mgr.stopPlugin(id)
@@ -3141,6 +3180,7 @@ exports.init = async api => {
         middleware,
         customRest: {
             pluginsRepair_scan: restScan,
+            pluginsRepair_abortJob: restAbortJob,
             pluginsRepair_job: restJob,
             pluginsRepair_apply: restApply,
             pluginsRepair_decision: restDecision,

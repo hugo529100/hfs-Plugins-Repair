@@ -1,6 +1,6 @@
-/* Plugins Repair - admin panel styles
- * Scoped under #repair-panel so HFS/MUI themes cannot leak in or out.
- */
+
+
+
 .repair-native-error-hidden { display: none !important; }
 #repair-panel.repair-panel {
     --rp-bg: #fbfcfe;    --rp-panel: #ffffff;
@@ -342,7 +342,7 @@ body.repair-fullscreen-active { overflow: hidden !important; }
 }
 #repair-panel .repair-config-actions .repair-btn { padding: 5px 9px; font-size: 11.5px; }
 
-/* The Installed tab is the backend settings view; the sidebar is the repair view. */
+
 #repair-panel[data-repair-mode="repair"] .repair-order { display: none !important; }
 #repair-panel .repair-order {
     border: 1px solid var(--rp-border);
@@ -935,11 +935,11 @@ body.repair-fullscreen-active { overflow: hidden !important; }
     color: var(--rp-muted);
 }
 
-/* tab looks native; tint only the label when selected */
+
 [data-repair-tab].Mui-selected { color: #e07b00 !important; }
 
-/* In full-page mode the native Plugins link may still be marked selected by
- * other plugins' route sync; keep it visually neutral and highlight ours. */
+
+
 body.repair-full-page a.repair-native-plugins-link.Mui-selected {
     background-color: transparent !important;
     color: inherit !important;
@@ -950,7 +950,7 @@ body.repair-full-page a.repair-native-plugins-link.Mui-selected .MuiListItemText
     font-weight: inherit !important;
 }
 
-/* toasts + modal are attached to <body>, outside the panel */
+
 #repair-toast-host {
     position: fixed;
     right: 18px;
@@ -1032,8 +1032,8 @@ body.repair-busy { cursor: progress; }
     #repair-panel .repair-results { max-height: 70vh; }
 }
 
-/* Tablet / narrow desktop: fill the panel and scroll the two panes internally
- * instead of growing past the page and clipping the lower half. */
+
+
 @media (min-width: 721px) and (max-width: 1180px) {
     #repair-panel .repair-body {
         grid-template-columns: 1fr;
@@ -1171,8 +1171,8 @@ body.repair-busy { cursor: progress; }
     #repair-panel .repair-name span { display: none; }
     #repair-panel .repair-decide { grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); }}
 
-/* Portrait phones: one pane at a time via a two-tab switch, saving vertical
- * space that the always-visible log used to take. */
+
+
 @media (max-width: 720px) and (orientation: portrait) {
     #repair-panel .repair-mobile-switch {
         display: grid;
@@ -1185,7 +1185,7 @@ body.repair-busy { cursor: progress; }
     #repair-panel[data-repair-mobile-view="log"] .repair-results { display: none; }
     #repair-panel[data-repair-mobile-view="log"] .repair-console { height: 55vh; }
 
-    /* Compact touch controls: cap the decision/toolbar button height. */
+    
     #repair-panel .repair-actions .repair-btn {
         padding: 7px 6px;
         min-height: 34px;
@@ -1208,7 +1208,7 @@ body.repair-busy { cursor: progress; }
     #repair-panel .repair-list { gap: 6px; }
     #repair-panel .repair-tag { font-size: 9px; padding: 1px 4px; }
     #repair-panel .repair-notes { margin-top: 2px; padding: 3px 5px; font-size: 9.5px; }
-    /* Tighten the footer: one-line hint and no extra residual height below the buttons. */
+    
     #repair-panel .repair-card-foot {
         padding: 0 4px 3px !important;
         margin: 0;

@@ -1,8 +1,8 @@
-/* Plugins Repair - admin panel extension
- *
- * Injected into /~/admin/ by the plugin middleware.
- * Adds an "ANALYZE & REPAIR" tab to the Plugins page and a full analysis/repair panel.
- */
+
+
+
+
+
 (function () {
     'use strict'
     if (!location.pathname.includes('/~/admin')) return
@@ -130,6 +130,9 @@
         nativeFullscreen: false,
         resumeChecked: false,
         autoScanned: false,
+        deepActive: false,
+        deepAbortRequested: false,
+        runningJobId: null,
         sidebarEntry: null,
         sidebarPlugins: null,
         fullPage: false,
@@ -139,9 +142,9 @@
         pageHeaderDisplay: null,
     }
 
-    // ============================================================
-    //  REST
-    // ============================================================
+    
+    
+    
     async function call(cmd, params, opts) {
         const timeout = (opts && opts.timeout) || 30000
         const controller = new AbortController()
@@ -169,9 +172,9 @@
     const rest = (name, params, opts) => call('_' + name, params, opts)
     const adminGet = (cmd, params) => call(cmd, params || {}, { timeout: 20000 })
 
-    // Plugins-Optimizer exposes its catalog/cache through its own admin REST API.
-    // Prefer it over a second GitHub search: it already has the VPN proxy link,
-    // the persistent catalog mirror and the raw-response cache.
+    
+    
+    
     async function optimizerCall(name, params, timeout = 120000) {
         const token = window.__OPTIMIZER_TOKEN__
         if (!token) throw new Error('Plugins-Optimizer is not active')
@@ -200,9 +203,9 @@
         } finally { clearTimeout(timer) }
     }
 
-    // ============================================================
-    //  Mount: tab + panel
-    // ============================================================
+    
+    
+    
     function findTablist() {
         const lists = $$('[role="tablist"]')
         return lists.find(list => {
@@ -248,8 +251,8 @@
                 }, true)
             }
         }
-        // CSS order keeps ANALYZE & REPAIR last. Do not move the node on every
-        // ensure: other tab-injecting plugins may be changing the same strip.
+        
+        
         tab.style.order = '9999'
         state.tab = tab
         if (state.active) {
@@ -266,10 +269,10 @@
         state.tabsRoot = tabsRoot
         state.root = root
         if (state.panel && state.panel.isConnected && state.panel.parentElement === root) {
-            // Never re-insert an already mounted panel except when a route change
-            // left the native tab strip below it (Get/Updates pages re-render the
-            // tabs as a later sibling). Moving it back above keeps the tabs on top
-            // without resetting scroll on normal renders.
+            
+            
+            
+            
             if (tabsRoot.compareDocumentPosition(state.panel) & Node.DOCUMENT_POSITION_PRECEDING)
                 root.insertBefore(state.panel, tabsRoot.nextSibling)
             if (!state.active) state.panel.style.display = 'none'
@@ -295,9 +298,9 @@
         if (state.report) renderAll()
     }
 
-    // ============================================================
-    //  Sidebar entry + full-page mode (no native tabs)
-    // ============================================================
+    
+    
+    
     function repairPageHref() {
         return location.pathname + '?pluginsRepair=1#/plugins/installed'
     }
@@ -417,7 +420,7 @@
             if (plugins) plugins.insertAdjacentElement('afterend', btn)
             else list.appendChild(btn)
         }
-        // Keep the shortcut directly below the native Plugins entry.
+        
         if (plugins && btn.previousElementSibling !== plugins)
             plugins.insertAdjacentElement('afterend', btn)
         state.sidebarEntry = btn
@@ -935,13 +938,13 @@
         state.paneDisplays.clear()
     }
 
-    // ============================================================
-    //  Actions
-    // ============================================================
+    
+    
+    
     async function onAction(act) {
         if (state.busy && act !== 'clear-log' && act !== 'copy-log') return
         if (act === 'scan') return scan(false)
-        if (act === 'deep') return deepCheck()
+        if (act === 'deep') return state.deepActive ? abortDeep() : deepCheck()
         if (act === 'apply') return applySelected()
         if (act === 'undo') return undoBatch()
         if (act === 'fullscreen') return toggleRepairFullscreen()
@@ -1302,8 +1305,10 @@
         try {
             const running = await runningIds()
             const r = await rest('pluginsRepair_scan', { deep, runningIds: running, refreshOnline: false })
+            state.runningJobId = r.jobId
             rememberJob(r.jobId, 'scan')
-            await pollJob(r.jobId)
+            const job = await pollJob(r.jobId)
+            if (job?.status === 'aborted') return
         } catch (e) {
             pushLog({ t: Date.now(), level: 'error', text: 'Scan failed: ' + e.message })
         } finally {
@@ -1342,13 +1347,43 @@
     }
 
     async function deepCheck() {
-        if (state.busy) return
-        if (!(state.activeOp?.kind === 'deep' && state.activeOp.phase === 'sync'))
-            beginActiveOp({ kind: 'deep' })
-        await syncOnline()
-        if (state.busy) return
-        pushLocal('info', 'Starting deep check (raw plugin.js probes + online versions)…')
-        await scan(true, false, true)
+        if (state.busy || state.deepActive) return
+        state.deepActive = true
+        state.deepAbortRequested = false
+        updateDeepButton()
+        try {
+            if (!(state.activeOp?.kind === 'deep' && state.activeOp.phase === 'sync'))
+                beginActiveOp({ kind: 'deep' })
+            pushLocal('info', 'Deep check uses an isolated online snapshot; the shared catalog is not overwritten.')
+            pushLocal('info', 'Starting deep check (raw plugin.js probes + online versions)…')
+            await scan(true, false, true)
+        } finally {
+            state.deepActive = false
+            state.deepAbortRequested = false
+            updateDeepButton()
+        }
+    }
+
+    async function abortDeep() {
+        if (!state.deepActive) return
+        state.deepAbortRequested = true
+        pushLocal('warn', 'Abort requested…')
+        updateDeepButton()
+        if (!state.runningJobId) return
+        try {
+            await rest('pluginsRepair_abortJob', { id: state.runningJobId }, { timeout: 10000 })
+            pushLocal('warn', 'Deep check aborted by user')
+        } catch (e) {
+            pushLocal('error', 'Abort failed: ' + e.message)
+        }
+    }
+
+    function updateDeepButton() {
+        const btn = $('[data-act="deep"]', state.panel || document)
+        if (!btn) return
+        btn.textContent = state.deepActive ? 'Abort' : 'Deep check'
+        btn.title = state.deepActive ? 'Abort the running deep check' : 'Sync the online catalog, then verify every repository and version against GitHub'
+        btn.classList.toggle('repair-danger', state.deepActive)
     }
 
     const ACTIVE_JOB_KEY = 'pluginsRepair.activeJob'
@@ -1413,6 +1448,8 @@
             state.activeOp = saved
             const r = await rest('pluginsRepair_job', { id: saved.id })
             if (!r.job) { clearRememberedJob(); return }
+            state.runningJobId = saved.id
+            if (saved.kind === 'deep') state.deepActive = true
             setBusy(true, `Resuming ${saved.kind || 'operation'}…`)
             pushLocal('info', `Resuming ${saved.kind || 'operation'} after page refresh…`)
             const job = await pollJob(saved.id)
@@ -1438,6 +1475,15 @@
             const stateEl = $('#repair-job-state')
             if (stateEl) stateEl.textContent = job.status === 'running' ? `running ${Math.round((Date.now() - started) / 1000)}s` : ''
             if (job.status !== 'running') {
+                state.runningJobId = null
+                if (job.status === 'aborted') {
+                    pushLocal('warn', 'Deep check aborted by user')
+                    toast('Deep check aborted', 'warn')
+                    clearRememberedJob()
+                    state.deepActive = false
+                    updateDeepButton()
+                    return job
+                }
                 if (job.status === 'error') pushLocal('error', 'Job failed: ' + (job.error || 'unknown'))
                 if (job.kind === 'scan' && job.result) {
                     state.report = job.result
@@ -1507,7 +1553,7 @@
         const picked = state.selected.has(id)
         let effective = decision
         let cancelled = null
-        // Ignore toggles off; Delete and Fix toggle back to the neutral state.
+        
         if (decision === 'ignore' && wasIgnored) effective = 'fix'
         else if (decision === 'delete' && wasDelete) {
             effective = 'fix'
@@ -1687,9 +1733,9 @@
         } finally { setBusy(false) }
     }
 
-    // ============================================================
-    //  Rendering
-    // ============================================================
+    
+    
+    
     function allItems() {
         if (!state.report) return []
         return [
@@ -1758,13 +1804,14 @@
         const items = state.report.items
         const all = allItems()
         const ignored = it => (state.decisions[it.id] || it.decision) === 'ignore'
+        const notPub = it => it.tags?.includes('not-published')
         const orphans = [...(state.report.orphans?.config || []), ...(state.report.orphans?.enable || []), ...(state.report.orphans?.keys || [])]
-        if (k === 'all') return items.filter(i => !ignored(i)).length
+        if (k === 'all') return items.filter(i => !ignored(i) && !notPub(i)).length
         if (k === 'orphans') return orphans.filter(i => !ignored(i)).length
-        if (k === 'ignored') return all.filter(i => ignored(i)).length
-        if (k === 'not-found') return items.filter(i => !ignored(i) && (i.tags?.includes('online-not-found') || i.tags?.includes('not-published'))).length
-        if (k === 'update') return items.filter(i => !ignored(i) && i.tags?.includes('update-available')).length
-        return items.filter(i => !ignored(i) && i.severity === k).length
+        if (k === 'ignored') return all.filter(i => ignored(i) && !notPub(i)).length
+        if (k === 'not-found') return items.filter(i => i.tags?.includes('online-not-found') || notPub(i)).length
+        if (k === 'update') return items.filter(i => !ignored(i) && !notPub(i) && i.tags?.includes('update-available')).length
+        return items.filter(i => !ignored(i) && !notPub(i) && i.severity === k).length
     }
 
     function visibleItems() {
@@ -1772,13 +1819,14 @@
         const items = state.report.items
         const all = allItems()
         const ignored = it => (state.decisions[it.id] || it.decision) === 'ignore'
+        const notPub = it => it.tags?.includes('not-published')
         const orphans = [...(state.report.orphans?.config || []), ...(state.report.orphans?.enable || []), ...(state.report.orphans?.keys || [])]
         if (state.filter === 'orphans') return orphans.filter(i => !ignored(i))
-        if (state.filter === 'ignored') return all.filter(i => ignored(i))
-        if (state.filter === 'not-found') return items.filter(i => !ignored(i) && (i.tags?.includes('online-not-found') || i.tags?.includes('not-published')))
-        if (state.filter === 'update') return items.filter(i => !ignored(i) && i.tags?.includes('update-available'))
-        if (state.filter === 'all') return items.filter(i => !ignored(i))
-        return items.filter(i => !ignored(i) && i.severity === state.filter)
+        if (state.filter === 'ignored') return all.filter(i => ignored(i) && !notPub(i))
+        if (state.filter === 'not-found') return items.filter(i => i.tags?.includes('online-not-found') || notPub(i))
+        if (state.filter === 'update') return items.filter(i => !ignored(i) && !notPub(i) && i.tags?.includes('update-available'))
+        if (state.filter === 'all') return items.filter(i => !ignored(i) && !notPub(i))
+        return items.filter(i => !ignored(i) && !notPub(i) && i.severity === state.filter)
     }
 
     function chip(label, cls) {
@@ -1807,6 +1855,7 @@
         const sev = it.severity || 'attention'
         const picked = state.selected.has(it.id)
         const isOrphan = !!it.kind
+        const notPublished = (it.tags || []).includes('not-published')
         const fixes = it.fixes || []
         const normalFixes = fixes.filter(f => !(f.type === 'update' && f.force))
         const forceFix = fixes.find(f => f.type === 'update' && f.force)
@@ -1815,7 +1864,7 @@
         const repoFix = fixes.find(f => f.type === 'repo')
         const cfgFix = fixes.find(f => f.type === 'config')
         const target = it.target?.id && it.target.id !== it.folder ? it.target.id : ''
-        const tags = (it.tags || []).map(t => chip(TAG_LABEL[t] || t, 'tag-' + t))
+        const tags = (it.tags || []).filter(t => !(notPublished && t === 'not-published')).map(t => chip(TAG_LABEL[t] || t, 'tag-' + t))
         const notesList = Array.isArray(it.notes) ? it.notes : (it.notes ? [it.notes] : [])
         const notes = notesList.map(n => `<div class="repair-note">• ${esc(n)}</div>`).join('')
         const repoLine = repoFix
@@ -1850,7 +1899,7 @@
 <article class="repair-card sev-${sev} ${picked ? 'picked' : ''} ${decision === 'ignore' ? 'ignored' : ''}" data-id="${esc(it.id)}">
   <div class="repair-card-head">
     <input type="checkbox" class="repair-pick" data-pick="${esc(it.id)}" ${picked ? 'checked' : ''}>
-    <span class="repair-sev sev-${sev}">${SEV_LABEL[sev] || sev}</span>
+    <span class="repair-sev sev-${notPublished ? 'dim' : sev}">${notPublished ? 'Not published' : (SEV_LABEL[sev] || sev)}</span>
     <code class="repair-folder">${esc(it.folder || it.key || it.id)}</code>
     ${target ? `<span class="repair-arrow">→</span><code class="repair-target">${esc(target)}</code>` : ''}
     <span class="repair-tags">${tags.join('')}</span>
@@ -2015,9 +2064,9 @@
         el.textContent = `${state.selected.size} selected`
     }
 
-    // ============================================================
-    //  Console
-    // ============================================================
+    
+    
+    
     function clearLog() {
         const log = $('#repair-log')
         if (log) log.innerHTML = ''
@@ -2055,9 +2104,9 @@
         } catch { toast('Copy failed (browser restriction)', 'warn') }
     }
 
-    // ============================================================
-    //  Dialogs / toast
-    // ============================================================
+    
+    
+    
     function toast(text, type) {
         let host = document.getElementById('repair-toast-host')
         if (!host) {
@@ -2112,13 +2161,15 @@
         if (el) el.textContent = busy ? (label || 'Working…') : ''
         for (const b of $$('.repair-actions .repair-btn')) {
             if (b.dataset.act === 'fullscreen') continue
+            if (b.dataset.act === 'deep' && state.deepActive) { b.disabled = false; continue }
             b.disabled = busy
         }
+        updateDeepButton()
     }
 
-    // ============================================================
-    //  Routing / mounting loop
-    // ============================================================
+    
+    
+    
     function onRoute() {
         const installed = location.hash.includes('/plugins/installed')
         ensureSidebarEntry()
