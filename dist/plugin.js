@@ -23,7 +23,7 @@
 
 
 exports.repo = "hugo529100/hfs-Plugins-Repair"
-exports.version = 2.42
+exports.version = 2.43
 exports.apiRequired = 12.7
 exports.description = 'Analyze and repair the installed plugin library: three-way check between online catalog, plugin folders and config.yaml, seamless config migration, safe folder renames, plugin.js repo fixes and trash-based deletion.'
 exports.preview = []

@@ -332,14 +332,27 @@
     }
     let sidebarObserver = null
     let sidebarObservedList = null
+    let sidebarEnsureQueued = false
+    function scheduleSidebarEnsure() {
+        if (sidebarEnsureQueued) return
+        sidebarEnsureQueued = true
+        queueMicrotask(() => {
+            sidebarEnsureQueued = false
+            ensureSidebarEntry()
+            // Chromium renders the native tab strip first; waiting for the
+            // 250ms mount timer made ANALYZE & REPAIR pop in a few frames later
+            // than the Notes / Optimizer tabs. ensureTab is idempotent and cheap.
+            if (location.hash.includes('/plugins/installed') && !isPluginTreePage()) {
+                const list = findTablist()
+                if (list) ensureTab(list)
+            }
+        })
+    }
     function watchSidebarList(list) {
         if (!list || (sidebarObservedList === list && sidebarObserver)) return
         if (sidebarObserver) sidebarObserver.disconnect()
         sidebarObservedList = list
-        sidebarObserver = new MutationObserver(() => {
-            if (!document.querySelector('[data-repair-sidebar]') || !list.contains(document.querySelector('[data-repair-sidebar]')))
-                queueMicrotask(ensureSidebarEntry)
-        })
+        sidebarObserver = new MutationObserver(scheduleSidebarEnsure)
         sidebarObserver.observe(list, { childList: true })
     }
 
@@ -392,6 +405,10 @@
                 return /#\/plugins$/.test(h) || h === '#/plugins'
             })
             || anchors.find(a => (a.getAttribute('href') || '').includes('/plugins') && !/pluginTree/i.test(a.getAttribute('href') || ''))
+        // Wait for the native Plugins entry instead of appending at the end:
+        // appending during the first partial React render caused the button to
+        // appear in the wrong place (and then jump around when the list settled).
+        if (!plugins) return
         if (!btn) {
             btn = document.createElement('a')
             btn.href = repairPageHref()
@@ -417,11 +434,10 @@
                 state.sidebarPending = false
                 navigateToRepairPage()
             })
-            if (plugins) plugins.insertAdjacentElement('afterend', btn)
-            else list.appendChild(btn)
+            plugins.insertAdjacentElement('afterend', btn)
         }
-        
-        if (plugins && btn.previousElementSibling !== plugins)
+
+        if (btn.previousElementSibling !== plugins)
             plugins.insertAdjacentElement('afterend', btn)
         state.sidebarEntry = btn
         state.sidebarPlugins = plugins || null
@@ -2219,7 +2235,7 @@
     }
     window.addEventListener('repair:route', () => setTimeout(onRoute, 0))
     const mo = new MutationObserver(() => {
-        ensureSidebarEntry()
+        scheduleSidebarEnsure()
         if (state.mountTimer) return
         state.mountTimer = setTimeout(() => {
             state.mountTimer = null
@@ -2228,7 +2244,10 @@
             if (location.hash.includes('/plugins/installed')) ensureMounted()
         }, 250)
     })
-    try { mo.observe(document.body, { childList: true, subtree: true }) } catch {}
+    // admin plugin scripts are injected in <head>, before <body> exists:
+    // observing document.body here used to throw (and get swallowed), leaving
+    // only the 1200ms interval to add the sidebar entry.
+    try { mo.observe(document.documentElement, { childList: true, subtree: true }) } catch {}
     setInterval(() => {
         ensureSidebarEntry()
         refreshPanelTheme()
